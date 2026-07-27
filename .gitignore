@@ -1,0 +1,46 @@
+# Secrets & local config — never commit these
+.env
+.env.*
+!.env.example
+service-account*.json
+*-credentials.json
+*-service-account.json
+*credentials*.json
+client_secret*.json
+token.json
+token.pickle
+*.pem
+*.key
+credentials/
+secrets/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Runtime artifacts (may contain org-specific IDs / transcript metadata)
+.state/
+logs/
+*.log
+
+# Local promo / marketing experiments (not part of the open-source bot)
+linkedin-video/
+linkedin-hyperframes/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/
+*.swp
+*~

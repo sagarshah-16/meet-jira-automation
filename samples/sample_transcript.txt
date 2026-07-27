@@ -1,0 +1,21 @@
+Daily Standup - 2026/07/26 09:30 GMT - Transcript
+
+00:00:05
+Priya Nair: Good morning everyone, hope you all watched the match last night.
+Bob Jones: Haha yes, what a finish!
+Priya Nair: Okay let's get started. Alice, you're up first.
+
+00:00:40
+Alice Smith: PROJ-101, yesterday I finished the OAuth login flow and pushed it for code review. Today I'll address review comments. No blockers.
+
+00:01:20
+Bob Jones: Proj one oh three. I'm still working on the payment webhook retries. I'm blocked on the staging credentials from the infra team, waiting since Tuesday. Otherwise the retry logic itself is done.
+
+00:02:10
+Priya Nair: Thanks Bob, I'll chase infra today. By the way, the office picnic is moved to Friday, don't forget to RSVP.
+
+00:02:30
+Carlos Diaz: PROJ-107. Started the dashboard charts. Got the data layer wired up, charts render with mock data. Today switching to the real API. Should be done by Thursday.
+
+00:03:05
+Priya Nair: Great. Anything else? No? Okay, see everyone tomorrow.
