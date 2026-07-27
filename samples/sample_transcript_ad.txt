@@ -1,0 +1,22 @@
+Daily Standup - 2026/07/26 09:30 GMT - Transcript
+
+00:00:05
+Lipika Swami: Morning all. Quick reminder the office AC is being fixed today, it might get warm in there. Okay, Rag, go ahead.
+
+00:00:30
+Rag Patel: AD-76, browser automation in Aria. Yesterday I got the click and type actions working end to end. Today I'm adding the screenshot capture step. No blockers right now.
+
+00:01:15
+Rasik: A D one twenty two. Still on the KPI matrix APIs. The reusable execution framework is mostly done, but I'm blocked on the schema review from Harsh, been waiting since Thursday. Once that lands I can wire the first two endpoints.
+
+00:02:00
+Lipika Swami: Harsh, can you pick that review up today? Also everyone, lunch order form closes at 11, don't miss it.
+
+00:02:20
+Harsh Lukka: Yes, will do the review this morning. My update: AD-83, the Aria desktop chat UI. Popup redesign is finished and in review. Packaging setup starts tomorrow.
+
+00:02:55
+Kelvin Checo: AD-119. Recurring email delivery. Google side is done and tested, Outlook flow is about seventy percent. Should finish by Wednesday. One thing, the Outlook sandbox tenant keeps expiring, it's slowing me down a bit but not fully blocked.
+
+00:03:40
+Lipika Swami: Nice progress everyone. That's it, see you tomorrow.

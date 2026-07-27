@@ -53,6 +53,16 @@ class Config:
     dry_run: bool = field(default_factory=lambda: _bool("DRY_RUN", True))
     max_transcript_age_hours: int = field(
         default_factory=lambda: int(os.getenv("MAX_TRANSCRIPT_AGE_HOURS", "24")))
+    # Jira statuses whose tickets should be flagged in the coverage report
+    # when no note was posted. Note: board COLUMN names can differ from status
+    # names (AD's "Testing/Observation" column holds status "STAGING").
+    report_statuses: tuple[str, ...] = field(default_factory=lambda: tuple(
+        s.strip().lower()
+        for s in os.getenv("REPORT_STATUSES", "In Progress,STAGING").split(",")
+        if s.strip()))
+    # Also write the coverage report as a new tab on the standup Doc
+    # (live Drive runs only; needs documents scope in the DWD grant).
+    doc_report_tab: bool = field(default_factory=lambda: _bool("DOC_REPORT_TAB", True))
 
     def __post_init__(self) -> None:
         # Normalize + validate whenever values are present (partial configs OK until require())

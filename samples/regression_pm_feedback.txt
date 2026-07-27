@@ -1,0 +1,16 @@
+STAND-UP - Transcript
+
+00:00:30
+Harsh Lukka: AD-126, the admin dashboard resource resolver. It is reviewed and it is ready to move to production.
+Bhavik Vadhia: Yes, I reviewed it and approved it, so we can push it.
+
+00:01:10
+Harsh Lukka: Next, AD-79, branding on generated assets. I can show quickly, you can upload logos, adjust the color palette, select logo alignment, and customize the footer layout.
+Bhavik Vadhia: Looks good. There were a few observations, one observation that I have shared with Harsh wherein it requires a minor UI improvement, which he will be working on, and once that is done this ticket is also ready to move to production.
+Harsh Lukka: Yes, I will work on that UI change.
+
+00:02:20
+Anurag Fichadiya: AD-28. So I changed the approach for the term loan we have and I named it as regular loan and you can uh test it in the environment.
+
+00:03:00
+Rag Patel: AD-115, the bearer token API for the desktop app. The web app uses cookie based authentication but the desktop app needs access and refresh tokens, so I am adding an API for the bearer token exchange. I will complete this today.

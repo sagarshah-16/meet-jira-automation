@@ -42,10 +42,12 @@ class TicketNote:
     summary: str = ""
     blocker: str = ""
     progress: str = ""
+    next_steps: str = ""
 
     @property
     def is_empty(self) -> bool:
-        return not any([self.status_update, self.summary, self.blocker, self.progress])
+        return not any([self.status_update, self.summary, self.blocker,
+                        self.progress, self.next_steps])
 
     def render(self, meeting_date: str) -> str:
         lines = [f"🤖 Auto-generated from standup — {meeting_date} · please verify", ""]
@@ -54,6 +56,7 @@ class TicketNote:
             ("Status", self.status_update),
             ("Blocker", self.blocker),
             ("Progress", self.progress),
+            ("Next Steps", self.next_steps),
         ]:
             if value:
                 lines.append(f"### {label}")
@@ -64,9 +67,20 @@ class TicketNote:
 
 
 @dataclass
+class NotUpdated:
+    """An active-work ticket that received no note this run, and why."""
+    key: str
+    status: str
+    assignee: str
+    summary: str
+    reason: str
+
+
+@dataclass
 class RunReport:
     transcript_name: str = ""
     tickets_updated: list[str] = field(default_factory=list)
     tickets_skipped: list[str] = field(default_factory=list)
+    not_updated: list[NotUpdated] = field(default_factory=list)
     segments_discarded: int = 0
     dry_run: bool = True

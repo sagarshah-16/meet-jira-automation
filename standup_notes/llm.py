@@ -35,10 +35,17 @@ Your job:
    but content clearly matches one ticket; "low" = plausible but uncertain.
    If you cannot attribute a segment to any listed ticket, discard it — never
    guess a key that wasn't provided.
+5. raw_text must be VERBATIM: copy the transcript turns word for word. Do NOT
+   paraphrase, shorten, or clean up. Losing a phrase like "I will complete
+   this today" or "you can test it in the environment" destroys the note that
+   is written from this text downstream.
+6. A segment includes what EVERY speaker said about that ticket — the
+   assignee's update AND any reviewer/PM remarks (observations, approvals,
+   requested changes, conditions like "ready after the UI fix").
 
 Return JSON only:
 {"segments": [{"ticket_key": "...", "confidence": "high|medium|low",
-  "speaker": "...", "turn_indices": [..], "raw_text": "verbatim-ish text of what was said",
+  "speaker": "...", "turn_indices": [..], "raw_text": "verbatim transcript text, all speakers",
   "reasoning": "one short sentence"}],
  "discarded_turn_indices": [..]}
 """
@@ -49,23 +56,60 @@ in standup. You are given the ticket's details and the relevant transcript
 excerpt.
 
 Produce JSON only:
-{"status_update": "...", "summary": "...", "blocker": "...", "progress": "..."}
+{"status_update": "...", "summary": "...", "blocker": "...", "progress": "...",
+ "next_steps": "..."}
 
-Rules:
-- summary: 1-3 sentences, plain language, what was discussed.
-- status_update: the state of the work as stated or clearly implied by the
-  discussion (e.g. "In code review", "Starting today", "Done, pending QA",
-  "In progress — ETA Wednesday"). Empty string only if you truly cannot tell.
+ACCURACY RULES — these override brevity, and violating them is worse than
+writing nothing:
+
+1. STATE FIDELITY. Report the work's state EXACTLY as spoken — never upgrade
+   or downgrade it. These are all DIFFERENT states; keep them distinct:
+   - already deployed/done
+   - approved and ready to deploy, but NOT yet deployed
+   - a commitment to finish by some time (NOT done yet)
+   - testable/available for testing (NOT approved)
+   If someone says "it is ready to move to production", the note must say
+   "ready to move to production" — NOT "has been pushed to production".
+   Express the state in the SPEAKER'S OWN WORDS — do not copy phrasing from
+   these instructions.
+
+2. NEVER DROP COMMITMENTS. Every stated ETA, deadline, or promise ("I will
+   complete this today", "targeting Wednesday", "once X is done this can go
+   to production") MUST appear in the note — in status_update and/or
+   next_steps. Omitting a stated "will finish today" makes the note wrong.
+
+3. NEVER INVENT FRAMING. Do not add mechanisms, comparisons, or causes that
+   were not spoken. If the speaker said "I changed the approach and named it
+   regular loan", do NOT write "replaced the previous logic" — nothing was
+   said about what happened to any previous logic. Stay close to the
+   speaker's own wording; short quoted phrases are welcome.
+
+4. INCLUDE REVIEWER/PM REMARKS. Observations, review feedback, conditions,
+   and requested changes from OTHER speakers about this ticket (e.g. "one
+   observation — needs a minor UI improvement, then it's ready") are part of
+   the ticket's state and MUST be captured.
+
+Field rules:
+- summary: 1-3 sentences, plain language, what was discussed — including any
+  reviewer observations and conditions.
+- status_update: the state EXACTLY as stated or clearly implied
+  (e.g. "Ready to move to production", "In progress — will complete today").
+  Empty string only if you truly cannot tell.
 - blocker: ONLY if a blocker/dependency/impediment was explicitly mentioned.
   Empty string otherwise. Never invent one.
 - progress: what moved forward since the last update, if said. Empty otherwise.
+- next_steps: what happens next AS STATED (e.g. "Fix minor UI issue, then
+  move to production", "Complete the API today"). Empty if none stated.
 - Refer to the engineer by their name as given, or with "they/them" — never
   assume gender from a name.
 - Minor impediments that are NOT blockers (e.g. "slowing me down a bit") belong
   in the summary, not the blocker field — but do include them.
-- Do not add information that was not said. No speculation.
 - If what was said is too thin to be useful (e.g. "no updates"), return all
   empty strings.
+
+Before returning, re-read the excerpt and verify: (a) every claim in your note
+was actually said, (b) no stated ETA/commitment/condition is missing, and
+(c) the tense/state of each claim matches what was spoken.
 """
 
 
@@ -126,4 +170,5 @@ class NotesLLM:
             summary=(data.get("summary") or "").strip(),
             blocker=(data.get("blocker") or "").strip(),
             progress=(data.get("progress") or "").strip(),
+            next_steps=(data.get("next_steps") or "").strip(),
         )

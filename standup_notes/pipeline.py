@@ -7,11 +7,75 @@ from pathlib import Path
 from .config import Config
 from .jira_client import JiraClient
 from .llm import NotesLLM
-from .models import RunReport, Segment, TicketNote
+from .models import NotUpdated, RunReport, Segment, Ticket, TicketNote
 from .transcript import extract_transcript_section, parse_transcript
 from .validation import clamp_transcript, validate_ticket_key
 
 STATE_FILE = Path(".state/processed.json")
+REPORTS_DIR = Path("logs")
+
+
+def _coverage_report(cfg: Config, report: RunReport, tickets: list[Ticket],
+                     meeting_date: str) -> dict | None:
+    """List active-work tickets that got no note this run, and why.
+
+    Returns structured data for the Doc-tab writer (or None if no targets).
+    """
+    target = [t for t in tickets if t.status.lower() in cfg.report_statuses]
+    if not target:
+        return None
+    updated = set(report.tickets_updated)
+    skipped = set(report.tickets_skipped)
+
+    for t in target:
+        if t.key in updated:
+            continue
+        if t.key in skipped:
+            reason = "Discussed, but nothing substantive was said"
+        else:
+            reason = "Not discussed in the standup (no attributable discussion found)"
+        report.not_updated.append(NotUpdated(
+            key=t.key, status=t.status, assignee=t.assignee,
+            summary=t.summary, reason=reason))
+
+    status_names = ", ".join(sorted({t.status for t in target}))
+    covered = [t.key for t in target if t.key in updated]
+    lines = [
+        f"# Standup coverage report — {meeting_date}",
+        f"Transcript: {report.transcript_name}",
+        f"Active-work statuses tracked: {status_names}",
+        "",
+        f"## Updated ({len(covered)}/{len(target)})",
+        ", ".join(covered) if covered else "(none)",
+        "",
+        f"## Not updated ({len(report.not_updated)})",
+    ]
+    for nu in report.not_updated:
+        lines.append(f"- **{nu.key}** [{nu.status}] "
+                     f"({nu.assignee or 'unassigned'}) — {nu.summary[:70]}\n"
+                     f"  ↳ {nu.reason}")
+    if not report.not_updated:
+        lines.append("(every active-work ticket got a note 🎉)")
+
+    text = "\n".join(lines)
+    print(f"\n──── Coverage report ────\n{text}")
+    REPORTS_DIR.mkdir(exist_ok=True)
+    out = REPORTS_DIR / f"coverage-report-{meeting_date}.md"
+    out.write_text(text + "\n")
+    print(f"\nSaved: {out}")
+
+    return {
+        "date": meeting_date,
+        "transcript": report.transcript_name,
+        "statuses": status_names,
+        "updated": covered,
+        "total": len(target),
+        "rows": [(nu.key, nu.status, nu.assignee or "unassigned",
+                  nu.summary[:60],
+                  "Discussed — nothing substantive said"
+                  if nu.reason.startswith("Discussed") else "Not discussed")
+                 for nu in report.not_updated],
+    }
 
 
 def _load_processed() -> set[str]:
@@ -117,7 +181,21 @@ def run(cfg: Config, transcript_text: str, transcript_id: str,
     if not cfg.dry_run:
         _mark_processed(transcript_id)
 
+    coverage = _coverage_report(cfg, report, tickets, meeting_date)
+
+    # Mirror the report into the standup Doc as a new tab (live Drive runs only —
+    # dry runs and local-file tests must never touch the shared doc).
+    is_drive_doc = not transcript_id.startswith("file:")
+    if coverage and cfg.doc_report_tab and is_drive_doc and not cfg.dry_run:
+        from .google_drive import write_coverage_tab
+        try:
+            write_coverage_tab(cfg, transcript_id, coverage)
+            print("✓ Coverage report added as a tab on the standup Doc.")
+        except Exception as e:  # Docs write must never sink the Jira run
+            print(f"⚠ Could not write report tab to the Doc: {e}")
+
     print(f"\nRun complete: {len(report.tickets_updated)} note(s) "
           f"{'drafted (dry run)' if cfg.dry_run else 'posted'}, "
-          f"{len(report.tickets_skipped)} skipped.")
+          f"{len(report.tickets_skipped)} skipped, "
+          f"{len(report.not_updated)} active ticket(s) without notes.")
     return report
