@@ -1,6 +1,7 @@
 """Shared data types for the pipeline."""
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 
 @dataclass
@@ -33,36 +34,46 @@ class Segment:
     reasoning: str = ""
 
 
+def _ddmmmyy(iso_date: str) -> str:
+    """2026-07-28 → 28-Jul-26 (falls back to the input on parse failure)."""
+    try:
+        return datetime.strptime(iso_date, "%Y-%m-%d").strftime("%d-%b-%y")
+    except ValueError:
+        return iso_date
+
+
 @dataclass
 class TicketNote:
     """The structured note to post as a Jira comment."""
     ticket_key: str
     confidence: str
-    status_update: str = ""
-    summary: str = ""
-    blocker: str = ""
-    progress: str = ""
-    next_steps: str = ""
+    progress: list[str] = field(default_factory=list)
+    discussion: list[str] = field(default_factory=list)
+    blockers: list[str] = field(default_factory=list)
+    next_steps: list[str] = field(default_factory=list)
+    eta: str = ""
 
     @property
     def is_empty(self) -> bool:
-        return not any([self.status_update, self.summary, self.blocker,
-                        self.progress, self.next_steps])
+        return not any([self.progress, self.discussion, self.blockers,
+                        self.next_steps, self.eta])
 
     def render(self, meeting_date: str) -> str:
-        lines = [f"🤖 Auto-generated from standup — {meeting_date} · please verify", ""]
-        for label, value in [
-            ("Summary", self.summary),
-            ("Status", self.status_update),
-            ("Blocker", self.blocker),
+        lines = [f"## Daily Update ({_ddmmmyy(meeting_date)})", ""]
+        for label, items in [
             ("Progress", self.progress),
+            ("Discussion", self.discussion),
+            ("Blockers / Dependencies", self.blockers),
             ("Next Steps", self.next_steps),
+            ("ETA", [self.eta] if self.eta else []),
         ]:
-            if value:
-                lines.append(f"### {label}")
-                lines.append(value)
+            if items:
+                lines.append(f"**{label}**")
+                lines += [f"- {item}" for item in items]
+                lines.append("")
+        lines.append("🤖 Auto-generated from standup transcript · please verify")
         if self.confidence == "low":
-            lines += ["", "⚠️ Low-confidence match — please confirm this note belongs to this ticket."]
+            lines.append("⚠️ Low-confidence match — please confirm this note belongs to this ticket.")
         return "\n".join(lines)
 
 

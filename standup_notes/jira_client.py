@@ -34,30 +34,57 @@ def _adf_to_text(node) -> str:
     return "".join(parts)
 
 
+_BOLD_ONLY_LINE = re.compile(r"^\*\*(.+)\*\*$")  # "**Label**"
+
+
 def _text_to_adf(body: str) -> dict:
-    """Convert our rendered note (lines, '*Label:* text' markers) to ADF."""
-    paragraphs = []
+    """Convert our rendered note to ADF: '## ' → h2, '### ' → h3,
+    '**Label**' → bold paragraph, '- x' runs → bullet lists."""
+    content: list[dict] = []
+    bullets: list[str] = []
+
+    def flush_bullets() -> None:
+        if bullets:
+            content.append({"type": "bulletList", "content": [
+                {"type": "listItem", "content": [
+                    {"type": "paragraph",
+                     "content": [{"type": "text", "text": b}]}]}
+                for b in bullets]})
+            bullets.clear()
+
     for line in body.splitlines():
         if not line.strip():
             continue
+        if line.startswith("- "):
+            bullets.append(line[2:].strip())
+            continue
+        flush_bullets()
+        if line.startswith("## "):
+            content.append({"type": "heading", "attrs": {"level": 2},
+                            "content": [{"type": "text", "text": line[3:]}]})
+            continue
         if line.startswith("### "):
-            paragraphs.append({
-                "type": "heading", "attrs": {"level": 3},
-                "content": [{"type": "text", "text": line[4:]}],
-            })
+            content.append({"type": "heading", "attrs": {"level": 3},
+                            "content": [{"type": "text", "text": line[4:]}]})
+            continue
+        m = _BOLD_ONLY_LINE.match(line)
+        if m:
+            content.append({"type": "paragraph", "content": [
+                {"type": "text", "text": m.group(1),
+                 "marks": [{"type": "strong"}]}]})
             continue
         m = _BOLD_LINE.match(line)
         if m:
-            content = [
-                {"type": "text", "text": m.group(1) + ": ",
-                 "marks": [{"type": "strong"}]},
-            ]
+            para = [{"type": "text", "text": m.group(1) + ": ",
+                     "marks": [{"type": "strong"}]}]
             if m.group(2):
-                content.append({"type": "text", "text": m.group(2)})
-        else:
-            content = [{"type": "text", "text": line}]
-        paragraphs.append({"type": "paragraph", "content": content})
-    return {"type": "doc", "version": 1, "content": paragraphs}
+                para.append({"type": "text", "text": m.group(2)})
+            content.append({"type": "paragraph", "content": para})
+            continue
+        content.append({"type": "paragraph",
+                        "content": [{"type": "text", "text": line}]})
+    flush_bullets()
+    return {"type": "doc", "version": 1, "content": content}
 
 
 def _http_error_message(resp: requests.Response) -> str:

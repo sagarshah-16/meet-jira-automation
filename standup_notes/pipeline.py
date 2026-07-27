@@ -166,9 +166,6 @@ def run(cfg: Config, transcript_text: str, transcript_id: str,
             report.tickets_skipped.append(key)
             print(f"  ∅ {key}: nothing substantive said — skipping.")
             continue
-        if not note.status_update:
-            # Status header should always be present; fall back to the board column.
-            note.status_update = f"{ticket_by_key[key].status} (from board)"
 
         body = note.render(meeting_date)
         if cfg.dry_run:

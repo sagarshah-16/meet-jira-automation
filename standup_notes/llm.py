@@ -55,9 +55,10 @@ You write a concise Jira comment from what an engineer said about one ticket
 in standup. You are given the ticket's details and the relevant transcript
 excerpt.
 
-Produce JSON only:
-{"status_update": "...", "summary": "...", "blocker": "...", "progress": "...",
- "next_steps": "..."}
+Produce JSON only (each list holds short bullet points; empty list if nothing
+was said for that section):
+{"progress": ["..."], "discussion": ["..."], "blockers": ["..."],
+ "next_steps": ["..."], "eta": "..."}
 
 ACCURACY RULES — these override brevity, and violating them is worse than
 writing nothing:
@@ -75,8 +76,8 @@ writing nothing:
 
 2. NEVER DROP COMMITMENTS. Every stated ETA, deadline, or promise ("I will
    complete this today", "targeting Wednesday", "once X is done this can go
-   to production") MUST appear in the note — in status_update and/or
-   next_steps. Omitting a stated "will finish today" makes the note wrong.
+   to production") MUST appear in the note — in eta and/or next_steps.
+   Omitting a stated "will finish today" makes the note wrong.
 
 3. NEVER INVENT FRAMING. Do not add mechanisms, comparisons, or causes that
    were not spoken. If the speaker said "I changed the approach and named it
@@ -90,22 +91,27 @@ writing nothing:
    the ticket's state and MUST be captured.
 
 Field rules:
-- summary: 1-3 sentences, plain language, what was discussed — including any
-  reviewer observations and conditions.
-- status_update: the state EXACTLY as stated or clearly implied
-  (e.g. "Ready to move to production", "In progress — will complete today").
-  Empty string only if you truly cannot tell.
-- blocker: ONLY if a blocker/dependency/impediment was explicitly mentioned.
-  Empty string otherwise. Never invent one.
-- progress: what moved forward since the last update, if said. Empty otherwise.
-- next_steps: what happens next AS STATED (e.g. "Fix minor UI issue, then
-  move to production", "Complete the API today"). Empty if none stated.
+- progress: the state of the work — what was completed, what moved forward,
+  AND what is actively being worked on, in the speaker's own words
+  (e.g. "Reviewed and ready to move to production", "Adding an API for
+  bearer token exchange for the desktop app"). The reader must be able to
+  tell from these bullets what the engineer is doing. Empty list only if
+  the work itself was not described at all.
+- discussion: other things discussed — reviewer/PM observations, decisions,
+  demo feedback, conditions, minor impediments that are not blockers.
+  Do not repeat progress bullets here. Empty list if nothing beyond progress.
+- blockers: ONLY blockers/dependencies/impediments explicitly mentioned.
+  Empty list otherwise. Never invent one.
+- next_steps: what happens next AS STATED (e.g. "Fix the minor UI issue,
+  then move to production"). Empty list if none stated.
+- eta: the stated completion time/date ONLY if one was spoken, capitalized
+  (e.g. "Today", "Wednesday", "End of this week"). Empty string otherwise —
+  never infer or invent a date.
 - Refer to the engineer by their name as given, or with "they/them" — never
   assume gender from a name.
-- Minor impediments that are NOT blockers (e.g. "slowing me down a bit") belong
-  in the summary, not the blocker field — but do include them.
+- Keep bullets short and factual; one fact per bullet.
 - If what was said is too thin to be useful (e.g. "no updates"), return all
-  empty strings.
+  sections empty.
 
 Before returning, re-read the excerpt and verify: (a) every claim in your note
 was actually said, (b) no stated ETA/commitment/condition is missing, and
@@ -163,12 +169,20 @@ class NotesLLM:
             f"TRANSCRIPT EXCERPT:\n{segment.raw_text}"
         )
         data = self._json_call(_PASS_B_SYSTEM, user)
+
+        def bullets(name: str) -> list[str]:
+            v = data.get(name) or []
+            if isinstance(v, str):  # tolerate a stray string from the model
+                v = [v]
+            return [s.strip() for s in v if isinstance(s, str) and s.strip()]
+
         return TicketNote(
             ticket_key=segment.ticket_key,
             confidence=segment.confidence,
-            status_update=(data.get("status_update") or "").strip(),
-            summary=(data.get("summary") or "").strip(),
-            blocker=(data.get("blocker") or "").strip(),
-            progress=(data.get("progress") or "").strip(),
-            next_steps=(data.get("next_steps") or "").strip(),
+            progress=bullets("progress"),
+            discussion=bullets("discussion"),
+            blockers=bullets("blockers"),
+            next_steps=bullets("next_steps"),
+            eta=(data.get("eta") or "").strip()
+            if isinstance(data.get("eta"), str) else "",
         )
