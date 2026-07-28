@@ -8,7 +8,8 @@ from .config import Config
 from .jira_client import JiraClient
 from .llm import NotesLLM
 from .models import NotUpdated, RunReport, Segment, Ticket, TicketNote
-from .transcript import extract_transcript_section, parse_transcript, spoken_ticket_keys
+from .transcript import (extract_transcript_section, parse_transcript,
+                         strip_report_section, ticket_keys_in_text)
 from .validation import clamp_transcript, validate_ticket_key
 
 STATE_FILE = Path(".state/processed.json")
@@ -145,7 +146,11 @@ def run(cfg: Config, transcript_text: str, transcript_id: str,
     # (e.g. work that starts next sprint) still deserve notes — fetch them
     # by key so the guardrail doesn't silently drop them.
     known = {t.key for t in tickets}
-    extra_keys = sorted(spoken_ticket_keys(turns, cfg.jira_project_key) - known)[:20]
+    # Scan the whole doc (summary included — Gemini writes keys cleanly there),
+    # minus our own report tab, so conversational forms don't slip through.
+    extra_keys = sorted(
+        ticket_keys_in_text(strip_report_section(transcript_text),
+                            cfg.jira_project_key) - known)[:20]
     for key in extra_keys:
         ticket = jira.fetch_issue(key)
         if ticket:

@@ -30,6 +30,10 @@ Your job:
      may garble keys ("proj one twenty three", "PROJ 1 2 3") — normalize them.
    - Keys are often spoken as bare numbers ("starting with 79, the branding
      ticket", "moving to 122") — match the number against the ticket list.
+   - Garbled digits happen: "ticket number 8057" may really be ticket 57, and
+     "1020" may be 120. When a spoken number matches no listed ticket, check
+     whether the surrounding content clearly matches a listed ticket instead —
+     attribute by content, and never invent a key for the garbled number.
    - If the spoken key doesn't exist in the list, or none was spoken, match by
      content against ticket summaries/descriptions/assignees.
 3. DISCARD everything that is not about a ticket: greetings, jokes, logistics,
@@ -42,10 +46,20 @@ Your job:
    is discussed — the assignee's update AND any reviewer/PM remarks
    (observations, approvals, requested changes, conditions like "ready after
    the UI fix"). The note is written downstream from exactly these turns, so
-   a missing index means lost information.
+   a missing index means lost information. When unsure whether an adjacent
+   turn belongs to the discussion, INCLUDE it — extra context is harmless,
+   a dropped turn loses information forever.
 6. COVER EVERY TICKET DISCUSSED. Return one segment per ticket that was
    discussed, no matter how many that is — never limit or truncate the
-   segment list. A long standup can easily cover 8-15 tickets.
+   segment list. A long standup can easily cover 8-15 tickets, and a window
+   of it may still contain updates for several tickets back to back.
+7. Round-robin standups move fast: each engineer may cover 2-4 tickets in
+   consecutive turns, and the PM's opening/closing remarks often cover
+   several more. Treat EVERY topic shift as a potential new ticket.
+
+Before returning, do a completeness pass: go through the ticket list once
+more and ask, for each ticket, "is any part of this window about it —
+even without the key being spoken?" Add any segment you missed.
 
 Return JSON only (do NOT copy transcript text into the output — indices only):
 {"segments": [{"ticket_key": "...", "confidence": "high|medium|low",
