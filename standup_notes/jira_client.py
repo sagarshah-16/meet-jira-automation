@@ -138,6 +138,23 @@ class JiraClient:
                 break
         return tickets
 
+    def fetch_issue(self, key: str) -> Ticket | None:
+        """Fetch one ticket by key; None if it doesn't exist (mis-heard key)."""
+        resp = self.session.get(
+            f"{self.base}/rest/api/3/issue/{key}",
+            params={"fields": "summary,status,assignee,description"}, timeout=30)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        f = resp.json()["fields"]
+        return Ticket(
+            key=key,
+            summary=f.get("summary") or "",
+            status=(f.get("status") or {}).get("name", ""),
+            assignee=((f.get("assignee") or {}).get("displayName") or ""),
+            description=_adf_to_text(f.get("description")).strip(),
+        )
+
     def add_comment(self, ticket_key: str, body: str) -> dict:
         key = validate_ticket_key(ticket_key)
         resp = self.session.post(

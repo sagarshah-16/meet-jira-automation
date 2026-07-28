@@ -73,6 +73,20 @@ def parse_transcript(text: str) -> list[TranscriptTurn]:
     return turns
 
 
+def spoken_ticket_keys(turns: list[TranscriptTurn], project_key: str) -> set[str]:
+    """Ticket keys explicitly spoken in the transcript ("AD-127", "AD127",
+    "ticket 127"). Used to pull discussed tickets that the sprint JQL missed."""
+    pat = re.compile(
+        rf"\b(?:{re.escape(project_key)}[\s-]?"
+        rf"|ticket\s+(?:number\s+)?(?:{re.escape(project_key)}[\s-]?)?)"
+        r"(\d{1,5})\b", re.IGNORECASE)
+    keys = set()
+    for t in turns:
+        for m in pat.finditer(t.text):
+            keys.add(f"{project_key}-{int(m.group(1))}")
+    return keys
+
+
 def render_turns(turns: list[TranscriptTurn], offset: int = 0) -> str:
     """Compact plain-text rendering used as LLM input.
 

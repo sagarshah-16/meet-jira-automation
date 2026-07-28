@@ -8,7 +8,7 @@ from .config import Config
 from .jira_client import JiraClient
 from .llm import NotesLLM
 from .models import NotUpdated, RunReport, Segment, Ticket, TicketNote
-from .transcript import extract_transcript_section, parse_transcript
+from .transcript import extract_transcript_section, parse_transcript, spoken_ticket_keys
 from .validation import clamp_transcript, validate_ticket_key
 
 STATE_FILE = Path(".state/processed.json")
@@ -39,13 +39,15 @@ def _coverage_report(cfg: Config, report: RunReport, tickets: list[Ticket],
             summary=t.summary, reason=reason))
 
     status_names = ", ".join(sorted({t.status for t in target}))
-    covered = [t.key for t in target if t.key in updated]
+    # The updated list shows EVERY ticket that got a note this run, whatever
+    # its status — only the not-updated table is filtered to active statuses.
+    covered = list(report.tickets_updated)
     lines = [
         f"# Standup coverage report — {meeting_date}",
         f"Transcript: {report.transcript_name}",
         f"Active-work statuses tracked: {status_names}",
         "",
-        f"## Updated ({len(covered)}/{len(target)})",
+        f"## Updated ({len(covered)})",
         ", ".join(covered) if covered else "(none)",
         "",
         f"## Not updated ({len(report.not_updated)})",
@@ -69,7 +71,6 @@ def _coverage_report(cfg: Config, report: RunReport, tickets: list[Ticket],
         "transcript": report.transcript_name,
         "statuses": status_names,
         "updated": covered,
-        "total": len(target),
         "rows": [(nu.key, nu.status, nu.assignee or "unassigned",
                   nu.summary[:60],
                   "Discussed — nothing substantive said"
@@ -139,6 +140,17 @@ def run(cfg: Config, transcript_text: str, transcript_id: str,
         print("No open tickets returned by JQL — aborting (check JIRA_CONTEXT_JQL).")
         return report
     print(f"Fetched {len(tickets)} open tickets from {cfg.jira_project_key}.")
+
+    # Tickets explicitly spoken in the meeting but outside the sprint JQL
+    # (e.g. work that starts next sprint) still deserve notes — fetch them
+    # by key so the guardrail doesn't silently drop them.
+    known = {t.key for t in tickets}
+    extra_keys = sorted(spoken_ticket_keys(turns, cfg.jira_project_key) - known)[:20]
+    for key in extra_keys:
+        ticket = jira.fetch_issue(key)
+        if ticket:
+            tickets.append(ticket)
+            print(f"  + {key} [{ticket.status}]: spoken in meeting, outside sprint context")
     ticket_by_key = {t.key: t for t in tickets}
 
     llm = NotesLLM(cfg)

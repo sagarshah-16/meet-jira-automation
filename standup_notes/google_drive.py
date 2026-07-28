@@ -90,7 +90,7 @@ def write_coverage_tab(cfg: Config, doc_id: str, data: dict) -> str:
     t_title = f"Standup Coverage Report — {data['date']}\n"
     t_tr = f"Transcript: {data['transcript']}\n"
     t_st = f"Statuses tracked: {data['statuses']}\n"
-    up_label = f"Updated ({len(data['updated'])}/{data['total']}):"
+    up_label = f"Updated ({len(data['updated'])}):"
     t_up = f"{up_label} {updated_join}\n"
     t_nu = f"Not updated ({len(data['rows'])})\n"
     full = t_title + t_tr + t_st + t_up + t_nu
