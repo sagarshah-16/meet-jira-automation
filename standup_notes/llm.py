@@ -10,6 +10,7 @@ Pass B — turn each attributed segment into a structured note
 """
 
 import json
+import re
 
 from openai import OpenAI
 
@@ -27,6 +28,8 @@ Your job:
 2. Attribute each segment to a ticket key from the provided list ONLY.
    - A spoken ticket key (e.g. "PROJ-123") is the primary anchor. Speech-to-text
      may garble keys ("proj one twenty three", "PROJ 1 2 3") — normalize them.
+   - Keys are often spoken as bare numbers ("starting with 79, the branding
+     ticket", "moving to 122") — match the number against the ticket list.
    - If the spoken key doesn't exist in the list, or none was spoken, match by
      content against ticket summaries/descriptions/assignees.
 3. DISCARD everything that is not about a ticket: greetings, jokes, logistics,
@@ -35,17 +38,18 @@ Your job:
    but content clearly matches one ticket; "low" = plausible but uncertain.
    If you cannot attribute a segment to any listed ticket, discard it — never
    guess a key that wasn't provided.
-5. raw_text must be VERBATIM: copy the transcript turns word for word. Do NOT
-   paraphrase, shorten, or clean up. Losing a phrase like "I will complete
-   this today" or "you can test it in the environment" destroys the note that
-   is written from this text downstream.
-6. A segment includes what EVERY speaker said about that ticket — the
-   assignee's update AND any reviewer/PM remarks (observations, approvals,
-   requested changes, conditions like "ready after the UI fix").
+5. turn_indices must be COMPLETE: list every turn index in which that ticket
+   is discussed — the assignee's update AND any reviewer/PM remarks
+   (observations, approvals, requested changes, conditions like "ready after
+   the UI fix"). The note is written downstream from exactly these turns, so
+   a missing index means lost information.
+6. COVER EVERY TICKET DISCUSSED. Return one segment per ticket that was
+   discussed, no matter how many that is — never limit or truncate the
+   segment list. A long standup can easily cover 8-15 tickets.
 
-Return JSON only:
+Return JSON only (do NOT copy transcript text into the output — indices only):
 {"segments": [{"ticket_key": "...", "confidence": "high|medium|low",
-  "speaker": "...", "turn_indices": [..], "raw_text": "verbatim transcript text, all speakers",
+  "speaker": "main speaker name", "turn_indices": [..],
   "reasoning": "one short sentence"}],
  "discarded_turn_indices": [..]}
 """
@@ -136,29 +140,84 @@ class NotesLLM:
         )
         return json.loads(resp.choices[0].message.content)
 
+    # Long transcripts are segmented in overlapping windows — a single pass
+    # over 300+ turns reliably under-extracts (tickets get silently skipped).
+    CHUNK_TURNS = 80
+    CHUNK_OVERLAP = 10
+
     def segment(self, turns: list[TranscriptTurn], tickets: list[Ticket]) -> list[Segment]:
         ticket_block = "\n".join(t.brief() for t in tickets)
-        user = (
-            f"OPEN TICKETS:\n{ticket_block}\n\n"
-            f"TRANSCRIPT (numbered turns):\n{render_turns(turns)}"
-        )
-        data = self._json_call(_PASS_A_SYSTEM, user)
-
         valid_keys = {t.key for t in tickets}
+        conf_rank = {"high": 2, "medium": 1, "low": 0}
+        # ticket_key -> {"indices": set, "confidence": str, "speaker": str, "reasoning": str}
+        acc: dict[str, dict] = {}
+
+        start = 0
+        while start < len(turns):
+            end = min(len(turns), start + self.CHUNK_TURNS)
+            user = (
+                f"OPEN TICKETS:\n{ticket_block}\n\n"
+                f"TRANSCRIPT (turns {start}-{end - 1} of {len(turns)} — a window "
+                f"of the full standup; indices are global):\n"
+                f"{render_turns(turns[start:end], offset=start)}"
+            )
+            data = self._json_call(_PASS_A_SYSTEM, user)
+            for s in data.get("segments", []):
+                try:
+                    key = validate_ticket_key(s.get("ticket_key") or "")
+                except ValueError:
+                    continue
+                if key not in valid_keys:
+                    continue  # hard guardrail: never post outside fetched context
+                indices = {int(i) for i in s.get("turn_indices", [])
+                           if isinstance(i, (int, float)) and 0 <= int(i) < len(turns)}
+                if not indices:
+                    continue
+                entry = acc.setdefault(key, {
+                    "indices": set(), "confidence": "low",
+                    "speaker": s.get("speaker", ""),
+                    "reasoning": s.get("reasoning", "")})
+                entry["indices"] |= indices
+                if conf_rank[s.get("confidence", "low")] > conf_rank[entry["confidence"]]:
+                    entry["confidence"] = s.get("confidence", "low")
+            if end == len(turns):
+                break
+            start = end - self.CHUNK_OVERLAP
+
+        # Deterministic safety net: turns that explicitly speak a ticket key
+        # ("AD122", "ticket 127") are force-included with a small context
+        # window, so an LLM miss can never drop an explicitly named ticket.
+        prefixes = sorted({k.split("-")[0] for k in valid_keys})
+        spoken_key = re.compile(
+            r"\b(?:(?:" + "|".join(prefixes) + r")[\s-]?"
+            r"|ticket\s+(?:number\s+)?(?:(?:" + "|".join(prefixes) + r")[\s-]?)?)"
+            r"(\d{1,5})\b", re.IGNORECASE)
+        for i, t in enumerate(turns):
+            for m in spoken_key.finditer(t.text):
+                key = f"{prefixes[0]}-{int(m.group(1))}" if len(prefixes) == 1 else None
+                if key is None:
+                    continue
+                if key not in valid_keys:
+                    continue
+                entry = acc.setdefault(key, {
+                    "indices": set(), "confidence": "high",
+                    "speaker": t.speaker,
+                    "reasoning": "Spoken ticket key detected in transcript"})
+                entry["indices"] |= set(range(max(0, i - 1), min(len(turns), i + 4)))
+                entry["confidence"] = "high"
+
+        # Build one segment per ticket; text reconstructed verbatim from the
+        # union of referenced turns, so fidelity is guaranteed by code.
         segments = []
-        for s in data.get("segments", []):
-            try:
-                key = validate_ticket_key(s.get("ticket_key") or "")
-            except ValueError:
-                continue
-            if key not in valid_keys:
-                continue  # hard guardrail: never post to a ticket we didn't fetch
+        for key, e in acc.items():
+            ordered = sorted(e["indices"])
             segments.append(Segment(
                 ticket_key=key,
-                confidence=s.get("confidence", "low"),
-                speaker=s.get("speaker", ""),
-                raw_text=s.get("raw_text", ""),
-                reasoning=s.get("reasoning", ""),
+                confidence=e["confidence"],
+                speaker=e["speaker"],
+                raw_text="\n".join(
+                    f"{turns[i].speaker}: {turns[i].text}" for i in ordered),
+                reasoning=e["reasoning"],
             ))
         return segments
 

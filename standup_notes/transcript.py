@@ -25,10 +25,22 @@ _TIMESTAMP_RE = re.compile(r"^\d{1,2}:\d{2}(:\d{2})?$")
 def extract_transcript_section(text: str) -> str:
     """If the doc is a Gemini notes doc, slice from the embedded Transcript
     section (skipping Gemini's own summary). Otherwise return the text as-is.
+
+    Gemini has used several marker styles ("Transcript", "📖 Transcript",
+    "<Meeting> - Transcript"), and the summary above may itself mention
+    "Transcript" — so match the LAST marker line in the doc.
     """
-    m = re.search(r"^Transcript\s*$", text[200:], flags=re.MULTILINE)
-    if m:
-        return text[200 + m.start():]
+    # Our own "Jira Sync Report" tab is exported after the transcript —
+    # cut it (and anything following) so a re-read never parses report
+    # content as speech (its ticket keys would pollute segmentation).
+    cut = re.search(r"^Standup Coverage Report —", text, flags=re.MULTILINE)
+    if cut:
+        text = text[:cut.start()]
+    matches = list(re.finditer(
+        r"^\W*Transcript\s*$|^.{0,80}- Transcript\s*$",
+        text[200:], flags=re.MULTILINE))
+    if matches:
+        return text[200 + matches[-1].start():]
     return text
 # "Speaker Name: said something" — speaker part kept short to avoid matching
 # prose that happens to contain a colon.
@@ -61,10 +73,13 @@ def parse_transcript(text: str) -> list[TranscriptTurn]:
     return turns
 
 
-def render_turns(turns: list[TranscriptTurn]) -> str:
-    """Compact plain-text rendering used as LLM input."""
+def render_turns(turns: list[TranscriptTurn], offset: int = 0) -> str:
+    """Compact plain-text rendering used as LLM input.
+
+    offset lets a slice of a longer transcript keep its global turn numbers.
+    """
     out = []
-    for i, t in enumerate(turns):
+    for i, t in enumerate(turns, start=offset):
         ts = f" [{t.timestamp}]" if t.timestamp else ""
         out.append(f"({i}){ts} {t.speaker}: {t.text}")
     return "\n".join(out)
