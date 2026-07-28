@@ -68,6 +68,33 @@ Return JSON only (do NOT copy transcript text into the output — indices only):
  "discarded_turn_indices": [..]}
 """
 
+_PASS_R_SYSTEM = """\
+You do a REVERSE LOOKUP over a standup transcript. A first pass already
+extracted segments for most tickets; the tickets listed below are the ones it
+found NO discussion for. Your job is to double-check: search this transcript
+window specifically for each listed ticket.
+
+For each listed ticket, ask: is any part of this window about it? Look for its
+feature area, its summary/description keywords, and its assignee giving an
+update — the ticket key may never be spoken.
+
+PRECISION over recall in this pass:
+- Attribute ONLY when the content clearly relates to that ticket's summary/
+  description (same feature, same work). "confidence": "high" or "medium".
+- If a match is weak or generic (could be about anything), use "low" — such
+  matches are discarded downstream, which is the correct outcome. A wrong
+  note on the wrong ticket is worse than no note.
+- Finding nothing for most or all listed tickets is a perfectly good result —
+  it confirms they were genuinely not discussed.
+- turn_indices must be complete for any ticket you do attribute (include the
+  assignee's update and any reviewer/PM remarks).
+
+Return JSON only (indices only, no transcript text):
+{"segments": [{"ticket_key": "...", "confidence": "high|medium|low",
+  "speaker": "main speaker name", "turn_indices": [..],
+  "reasoning": "one short sentence"}]}
+"""
+
 _PASS_B_SYSTEM = """\
 You write a concise Jira comment from what an engineer said about one ticket
 in standup. You are given the ticket's details and the relevant transcript
@@ -159,11 +186,16 @@ class NotesLLM:
     CHUNK_TURNS = 80
     CHUNK_OVERLAP = 10
 
-    def segment(self, turns: list[TranscriptTurn], tickets: list[Ticket]) -> list[Segment]:
+    def _chunked_acc(self, turns: list[TranscriptTurn], tickets: list[Ticket],
+                     system: str) -> dict[str, dict]:
+        """Run a segmentation prompt over overlapping transcript windows.
+
+        Returns ticket_key -> {"indices": set, "confidence", "speaker",
+        "reasoning"}, merged across windows.
+        """
         ticket_block = "\n".join(t.brief() for t in tickets)
         valid_keys = {t.key for t in tickets}
         conf_rank = {"high": 2, "medium": 1, "low": 0}
-        # ticket_key -> {"indices": set, "confidence": str, "speaker": str, "reasoning": str}
         acc: dict[str, dict] = {}
 
         start = 0
@@ -175,7 +207,7 @@ class NotesLLM:
                 f"of the full standup; indices are global):\n"
                 f"{render_turns(turns[start:end], offset=start)}"
             )
-            data = self._json_call(_PASS_A_SYSTEM, user)
+            data = self._json_call(system, user)
             for s in data.get("segments", []):
                 try:
                     key = validate_ticket_key(s.get("ticket_key") or "")
@@ -197,6 +229,29 @@ class NotesLLM:
             if end == len(turns):
                 break
             start = end - self.CHUNK_OVERLAP
+        return acc
+
+    @staticmethod
+    def _acc_to_segments(acc: dict[str, dict],
+                         turns: list[TranscriptTurn]) -> list[Segment]:
+        """One segment per ticket; text reconstructed verbatim from the union
+        of referenced turns, so fidelity is guaranteed by code."""
+        segments = []
+        for key, e in acc.items():
+            ordered = sorted(e["indices"])
+            segments.append(Segment(
+                ticket_key=key,
+                confidence=e["confidence"],
+                speaker=e["speaker"],
+                raw_text="\n".join(
+                    f"{turns[i].speaker}: {turns[i].text}" for i in ordered),
+                reasoning=e["reasoning"],
+            ))
+        return segments
+
+    def segment(self, turns: list[TranscriptTurn], tickets: list[Ticket]) -> list[Segment]:
+        valid_keys = {t.key for t in tickets}
+        acc = self._chunked_acc(turns, tickets, _PASS_A_SYSTEM)
 
         # Deterministic safety net: turns that explicitly speak a ticket key
         # ("AD122", "ticket 127") are force-included with a small context
@@ -220,20 +275,19 @@ class NotesLLM:
                 entry["indices"] |= set(range(max(0, i - 1), min(len(turns), i + 4)))
                 entry["confidence"] = "high"
 
-        # Build one segment per ticket; text reconstructed verbatim from the
-        # union of referenced turns, so fidelity is guaranteed by code.
-        segments = []
-        for key, e in acc.items():
-            ordered = sorted(e["indices"])
-            segments.append(Segment(
-                ticket_key=key,
-                confidence=e["confidence"],
-                speaker=e["speaker"],
-                raw_text="\n".join(
-                    f"{turns[i].speaker}: {turns[i].text}" for i in ordered),
-                reasoning=e["reasoning"],
-            ))
-        return segments
+        return self._acc_to_segments(acc, turns)
+
+    def reverse_lookup(self, turns: list[TranscriptTurn],
+                       missed: list[Ticket]) -> list[Segment]:
+        """Second, focused sweep: given ONLY the tickets the main pass found
+        nothing for, search the transcript again for each. Precision-biased —
+        low-confidence matches are dropped rather than risking a wrong note.
+        """
+        if not missed:
+            return []
+        acc = self._chunked_acc(turns, missed, _PASS_R_SYSTEM)
+        return [s for s in self._acc_to_segments(acc, turns)
+                if s.confidence in ("high", "medium")]
 
     def structure(self, segment: Segment, ticket: Ticket) -> TicketNote:
         user = (

@@ -17,7 +17,7 @@ REPORTS_DIR = Path("logs")
 
 
 def _coverage_report(cfg: Config, report: RunReport, tickets: list[Ticket],
-                     meeting_date: str) -> dict | None:
+                     meeting_date: str, verified: set[str] = frozenset()) -> dict | None:
     """List active-work tickets that got no note this run, and why.
 
     Returns structured data for the Doc-tab writer (or None if no targets).
@@ -33,6 +33,8 @@ def _coverage_report(cfg: Config, report: RunReport, tickets: list[Ticket],
             continue
         if t.key in skipped:
             reason = "Discussed, but nothing substantive was said"
+        elif t.key in verified:
+            reason = "Not discussed in the standup (double-checked by reverse lookup)"
         else:
             reason = "Not discussed in the standup (no attributable discussion found)"
         report.not_updated.append(NotUpdated(
@@ -75,7 +77,9 @@ def _coverage_report(cfg: Config, report: RunReport, tickets: list[Ticket],
         "rows": [(nu.key, nu.status, nu.assignee or "unassigned",
                   nu.summary[:60],
                   "Discussed — nothing substantive said"
-                  if nu.reason.startswith("Discussed") else "Not discussed")
+                  if nu.reason.startswith("Discussed")
+                  else "Not discussed (double-checked)"
+                  if "double-checked" in nu.reason else "Not discussed")
                  for nu in report.not_updated],
     }
 
@@ -192,10 +196,38 @@ def run(cfg: Config, transcript_text: str, transcript_id: str,
             print(f"  ✓ Commented on {key} (confidence: {seg.confidence})")
         report.tickets_updated.append(key)
 
+    # Reverse lookup: before declaring active tickets "not discussed", sweep
+    # the transcript once more looking specifically for them. Precision-biased;
+    # anything it can't clearly attribute stays unposted.
+    verified: set[str] = set()
+    if cfg.reverse_lookup:
+        noted = set(report.tickets_updated) | set(report.tickets_skipped)
+        missed = [t for t in tickets
+                  if t.status.lower() in cfg.report_statuses and t.key not in noted]
+        if missed:
+            print(f"\nReverse lookup over {len(missed)} not-updated ticket(s): "
+                  f"{', '.join(t.key for t in missed)}")
+            for seg in _merge_segments(llm.reverse_lookup(turns, missed)):
+                note = llm.structure(seg, ticket_by_key[seg.ticket_key])
+                if note.is_empty:
+                    continue
+                body = note.render(meeting_date)
+                if cfg.dry_run:
+                    print(f"\n──── DRY RUN (reverse lookup) — would comment on "
+                          f"{seg.ticket_key} ────\n{body}\n")
+                else:
+                    jira.add_comment(seg.ticket_key, body)
+                    print(f"  ✓ {seg.ticket_key} recovered via reverse lookup "
+                          f"({seg.confidence})")
+                report.tickets_updated.append(seg.ticket_key)
+            verified = {t.key for t in missed} - set(report.tickets_updated)
+            if verified:
+                print(f"  Confirmed not discussed: {', '.join(sorted(verified))}")
+
     if not cfg.dry_run:
         _mark_processed(transcript_id)
 
-    coverage = _coverage_report(cfg, report, tickets, meeting_date)
+    coverage = _coverage_report(cfg, report, tickets, meeting_date, verified)
 
     # Mirror the report into the standup Doc as a new tab (live Drive runs only —
     # dry runs and local-file tests must never touch the shared doc).

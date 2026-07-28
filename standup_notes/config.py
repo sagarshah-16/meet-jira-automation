@@ -63,6 +63,8 @@ class Config:
     # Also write the coverage report as a new tab on the standup Doc
     # (live Drive runs only; needs documents scope in the DWD grant).
     doc_report_tab: bool = field(default_factory=lambda: _bool("DOC_REPORT_TAB", True))
+    # Second, precision-biased sweep for active tickets the main pass missed.
+    reverse_lookup: bool = field(default_factory=lambda: _bool("REVERSE_LOOKUP", True))
 
     def __post_init__(self) -> None:
         # Normalize + validate whenever values are present (partial configs OK until require())
